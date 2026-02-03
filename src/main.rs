@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
-use mongo_analyzer::{analyze_project, get_fields, get_indexes, get_methods, ProjectConfig};
+use mongo_analyzer::{
+    analyze_project, get_detailed_field_analysis, get_fields, get_indexes, get_methods,
+    ProjectConfig,
+};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -31,6 +34,9 @@ enum Commands {
         /// Service name to filter by
         #[arg(short, long)]
         service: Option<String>,
+        /// Show detailed field usage with counts and file breakdown
+        #[arg(long)]
+        verbose: bool,
     },
     /// Get all MongoDB methods used
     Methods {
@@ -111,19 +117,77 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 results.iter().map(|r| &r.service).collect();
             println!("   Services using MongoDB: {}", unique_services.len());
         }
-        Commands::Fields { service } => {
+        Commands::Fields { service, verbose } => {
             let results = analyze_project(&cli.directory, config)?;
-            let fields = get_fields(&results, service.as_deref());
 
-            println!("🔍 Field Analysis");
-            println!("==================\n");
+            if verbose {
+                let analyses = get_detailed_field_analysis(&results, service.as_deref());
 
-            for (collection, field_list) in fields {
-                println!("📄 Collection: {}", collection);
-                for field in &field_list {
-                    println!("   • {}", field);
+                println!("🔍 Detailed Field Analysis");
+                println!("=========================\n");
+
+                if analyses.is_empty() {
+                    println!("No MongoDB queries found matching the criteria.");
+                    return Ok(());
                 }
-                println!();
+
+                for analysis in &analyses {
+                    println!(
+                        "📄 Collection: {} ({} {})",
+                        analysis.collection,
+                        analysis.total_queries,
+                        if analysis.total_queries == 1 {
+                            "query"
+                        } else {
+                            "queries"
+                        }
+                    );
+
+                    // Show files accessing this collection
+                    println!("   📁 Files accessing:");
+                    for (file, query_count) in &analysis.files_accessing {
+                        println!(
+                            "      • {} ({} {})",
+                            file,
+                            query_count,
+                            if *query_count == 1 {
+                                "query"
+                            } else {
+                                "queries"
+                            }
+                        );
+                    }
+
+                    // Show field usage
+                    if !analysis.field_usage.is_empty() {
+                        println!("   📊 Field Usage:");
+                        for field_info in &analysis.field_usage {
+                            let usage_text = if field_info.total_usage == 1 {
+                                format!("{} time", field_info.total_usage)
+                            } else {
+                                format!("{} times", field_info.total_usage)
+                            };
+                            println!("      • {} ({})", field_info.field, usage_text);
+                        }
+                    } else {
+                        println!("   📊 Field Usage: No fields detected");
+                    }
+
+                    println!();
+                }
+            } else {
+                let fields = get_fields(&results, service.as_deref());
+
+                println!("🔍 Field Analysis");
+                println!("==================\n");
+
+                for (collection, field_list) in fields {
+                    println!("📄 Collection: {}", collection);
+                    for field in &field_list {
+                        println!("   • {}", field);
+                    }
+                    println!();
+                }
             }
         }
         Commands::Methods { service } => {
