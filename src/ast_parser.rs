@@ -1,10 +1,6 @@
 use crate::MongoQuery;
-use std::collections::{HashMap, HashSet};
-use swc_core::common::{
-    errors::{DiagnosticBuilder, Emitter, Handler},
-    sync::Lrc,
-    FileName, SourceMap,
-};
+use std::collections::HashMap;
+use swc_core::common::{sync::Lrc, FileName, SourceMap};
 use swc_core::ecma::ast::*;
 use swc_core::ecma::visit::{Visit, VisitWith};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsSyntax};
@@ -13,17 +9,15 @@ pub struct MongoQueryVisitor<'a> {
     pub queries: Vec<MongoQuery>,
     pub source_map: &'a SourceMap,
     pub file_path: String,
-    pub service_name: String,
     pub model_map: HashMap<String, String>, // property_name -> collection_name
 }
 
 impl<'a> MongoQueryVisitor<'a> {
-    pub fn new(source_map: &'a SourceMap, file_path: String, service_name: String) -> Self {
+    pub fn new(source_map: &'a SourceMap, file_path: String) -> Self {
         Self {
             queries: Vec::new(),
             source_map,
             file_path,
-            service_name,
             model_map: HashMap::new(),
         }
     }
@@ -299,7 +293,6 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
             self.queries.push(MongoQuery {
                 file: self.file_path.clone(),
                 line: line,
-                service: self.service_name.clone(),
                 collection,
                 method,
                 query_fields: fields,
@@ -310,12 +303,7 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
 }
 
 // Minimal no-op emitter to suppress errors during parsing
-struct NoopEmitter;
-impl Emitter for NoopEmitter {
-    fn emit(&mut self, _: &mut DiagnosticBuilder<'_>) {}
-}
-
-pub fn parse_file(content: &str, file_path: &str, service_name: &str) -> Vec<MongoQuery> {
+pub fn parse_file(content: &str, file_path: &str) -> Vec<MongoQuery> {
     let cm: Lrc<SourceMap> = Default::default();
 
     let fm = cm.new_source_file(
@@ -348,7 +336,7 @@ pub fn parse_file(content: &str, file_path: &str, service_name: &str) -> Vec<Mon
         }
     };
 
-    let mut visitor = MongoQueryVisitor::new(&cm, file_path.to_string(), service_name.to_string());
+    let mut visitor = MongoQueryVisitor::new(&cm, file_path.to_string());
     module.visit_with(&mut visitor);
 
     visitor.queries

@@ -1,21 +1,13 @@
 use clap::{Parser, Subcommand};
-use mongo_analyzer::{
-    analyze_project, get_detailed_field_analysis, get_fields, get_indexes, get_methods,
-    ProjectConfig,
-};
+use mongo_analyzer::{analyze_project, get_indexes};
 use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "mongo-analyzer")]
 #[command(about = "A CLI tool to analyze MongoDB queries in TypeScript projects")]
 struct Cli {
-    /// Directory to analyze (default: current directory)
     #[arg(short, long, default_value = ".")]
     directory: PathBuf,
-
-    /// Configuration file path
-    #[arg(short, long)]
-    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -23,191 +15,36 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Analyze the entire project for MongoDB usage patterns
-    Analyze {
-        /// Service name to focus on
-        #[arg(short, long)]
-        service: Option<String>,
-    },
-    /// Get all fields used in queries
-    Fields {
-        /// Service name to filter by
-        #[arg(short, long)]
-        service: Option<String>,
-        /// Show detailed field usage with counts and file breakdown
-        #[arg(long)]
-        verbose: bool,
-    },
-    /// Get all MongoDB methods used
-    Methods {
-        /// Service name to filter by
-        #[arg(short, long)]
-        service: Option<String>,
-    },
-    /// Generate index suggestions
-    Indexes {
-        /// Service name to filter by
-        #[arg(short, long)]
-        service: Option<String>,
-    },
+    Analyze,
+    Indexes,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    // Load config
-    let config = if let Some(config_path) = &cli.config {
-        let content = std::fs::read_to_string(config_path)?;
-        Some(serde_json::from_str::<ProjectConfig>(&content)?)
-    } else {
-        None
-    };
-
     match cli.command {
-        Commands::Analyze { service } => {
-            let results = analyze_project(&cli.directory, config)?;
+        Commands::Analyze => {
+            let results = analyze_project(&cli.directory)?;
 
-            if let Some(service_name) = service {
-                let service_results: Vec<_> = results
-                    .iter()
-                    .filter(|r| r.service == service_name)
-                    .collect();
+            println!("🔍 MongoDB Query Analysis Results");
+            println!("=====================================\n");
+            println!("   Total queries found: {}\n", results.len());
 
-                println!("🔍 Analysis for service: {}", service_name);
-                println!("Found {} MongoDB queries\n", service_results.len());
-
-                for result in &service_results {
-                    println!("📄 {}:{} ({})", result.file, result.line, result.collection);
-                    println!("   Method: {}", result.method);
-                    println!("   Fields: {}\n", result.query_fields.join(", "));
-                }
-            } else {
-                // Group by service
-                let mut services = std::collections::HashMap::new();
-                for result in &results {
-                    services
-                        .entry(&result.service)
-                        .or_insert_with(Vec::new)
-                        .push(result);
-                }
-
-                println!("🔍 MongoDB Query Analysis Results");
-                println!("=====================================\n");
-
-                for (service, queries) in services {
-                    println!("📦 Service: {}", service);
-                    println!("   Queries found: {}\n", queries.len());
-
-                    for query in queries {
-                        println!("   📄 {}:{} ({})", query.file, query.line, query.collection);
-                        println!("      Method: {}", query.method);
-                        println!("      Fields: {}", query.query_fields.join(", "));
-                    }
-                    println!();
-                }
+            for result in &results {
+                println!("📄 {}:{} ({})", result.file, result.line, result.collection);
+                println!("   Method: {}", result.method);
+                println!("   Fields: {}\n", result.query_fields.join(", "));
             }
 
-            // Summary
             println!("📊 Summary:");
             println!("   Total queries: {}", results.len());
             let unique_collections: std::collections::HashSet<_> =
                 results.iter().map(|r| &r.collection).collect();
             println!("   Unique collections: {}", unique_collections.len());
-            let unique_services: std::collections::HashSet<_> =
-                results.iter().map(|r| &r.service).collect();
-            println!("   Services using MongoDB: {}", unique_services.len());
         }
-        Commands::Fields { service, verbose } => {
-            let results = analyze_project(&cli.directory, config)?;
-
-            if verbose {
-                let analyses = get_detailed_field_analysis(&results, service.as_deref());
-
-                println!("🔍 Detailed Field Analysis");
-                println!("=========================\n");
-
-                if analyses.is_empty() {
-                    println!("No MongoDB queries found matching the criteria.");
-                    return Ok(());
-                }
-
-                for analysis in &analyses {
-                    println!(
-                        "📄 Collection: {} ({} {})",
-                        analysis.collection,
-                        analysis.total_queries,
-                        if analysis.total_queries == 1 {
-                            "query"
-                        } else {
-                            "queries"
-                        }
-                    );
-
-                    // Show files accessing this collection
-                    println!("   📁 Files accessing:");
-                    for (file, query_count) in &analysis.files_accessing {
-                        println!(
-                            "      • {} ({} {})",
-                            file,
-                            query_count,
-                            if *query_count == 1 {
-                                "query"
-                            } else {
-                                "queries"
-                            }
-                        );
-                    }
-
-                    // Show field usage
-                    if !analysis.field_usage.is_empty() {
-                        println!("   📊 Field Usage:");
-                        for field_info in &analysis.field_usage {
-                            let usage_text = if field_info.total_usage == 1 {
-                                format!("{} time", field_info.total_usage)
-                            } else {
-                                format!("{} times", field_info.total_usage)
-                            };
-                            println!("      • {} ({})", field_info.field, usage_text);
-                        }
-                    } else {
-                        println!("   📊 Field Usage: No fields detected");
-                    }
-
-                    println!();
-                }
-            } else {
-                let fields = get_fields(&results, service.as_deref());
-
-                println!("🔍 Field Analysis");
-                println!("==================\n");
-
-                for (collection, field_list) in fields {
-                    println!("📄 Collection: {}", collection);
-                    for field in &field_list {
-                        println!("   • {}", field);
-                    }
-                    println!();
-                }
-            }
-        }
-        Commands::Methods { service } => {
-            let results = analyze_project(&cli.directory, config)?;
-            let methods = get_methods(&results, service.as_deref());
-
-            println!("🔍 Method Usage");
-            println!("===============\n");
-
-            for (collection, method_list) in methods {
-                println!("📄 Collection: {}", collection);
-                for method in &method_list {
-                    println!("   • {}", method);
-                }
-                println!();
-            }
-        }
-        Commands::Indexes { service } => {
-            let results = analyze_project(&cli.directory, config)?;
-            let indexes = get_indexes(&results, service.as_deref());
+        Commands::Indexes => {
+            let results = analyze_project(&cli.directory)?;
+            let indexes = get_indexes(&results);
 
             println!("🔍 Index Suggestions");
             println!("====================\n");
