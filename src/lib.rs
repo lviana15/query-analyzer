@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod ast_parser;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub services: HashMap<String, ServiceConfig>,
@@ -87,6 +89,18 @@ impl Default for ProjectConfig {
                 excluded_files: vec!["*.spec.ts".to_string(), "*.test.ts".to_string()],
             },
         );
+        services.insert(
+            "mongo-repositories".to_string(),
+            ServiceConfig {
+                name: "mongo-repositories".to_string(),
+                patterns: vec![
+                    "mongo.*-repository\\.ts".to_string(),
+                    ".*-repository\\.ts".to_string(),
+                    "mongo.*\\.ts".to_string(),
+                ],
+                excluded_files: vec!["*.spec.ts".to_string(), "*.test.ts".to_string()],
+            },
+        );
 
         ProjectConfig { services }
     }
@@ -101,29 +115,61 @@ pub fn analyze_project(
 
     // Find all TypeScript files
     let ts_files = find_ts_files(root_dir)?;
+    println!(
+        "[DEBUG] Found {} TypeScript files in directory: {:?}",
+        ts_files.len(),
+        root_dir
+    );
 
-    for file_path in ts_files {
-        let content = fs::read_to_string(&file_path)?;
+    for file_path in &ts_files {
+        let content = fs::read_to_string(file_path)?;
         let file_path_str = file_path.to_string_lossy().to_string();
 
         // Determine which service this file belongs to
         let service_name = determine_service(&file_path_str, &config);
+        println!(
+            "[DEBUG] File: {} -> Service: {}",
+            file_path_str, service_name
+        );
 
         // Skip if service not in config
         if !config.services.contains_key(&service_name) {
+            println!(
+                "[DEBUG] Skipping file - service '{}' not in config",
+                service_name
+            );
             continue;
         }
 
         // Check if file should be excluded
         let service_config = &config.services[&service_name];
         if should_exclude_file(&file_path_str, service_config) {
+            println!("[DEBUG] Skipping excluded file: {}", file_path_str);
             continue;
         }
 
-        // Find MongoDB queries using multi-line detection
+        // Find MongoDB queries using AST parser
         let file_queries = find_mongo_queries(&content, &file_path_str, &service_name);
+        println!(
+            "[DEBUG] Found {} MongoDB queries in {}",
+            file_queries.len(),
+            file_path_str
+        );
+
+        for query in &file_queries {
+            println!(
+                "[DEBUG]   - {}() on collection '{}' at line {}",
+                query.method, query.collection, query.line
+            );
+        }
+
         queries.extend(file_queries);
     }
+
+    println!(
+        "[DEBUG] Total queries found before deduplication: {}",
+        queries.len()
+    );
 
     // Deduplicate queries based on file, line, and method
     queries.sort_by(|a, b| {
@@ -134,211 +180,15 @@ pub fn analyze_project(
     });
     queries.dedup();
 
+    println!(
+        "[DEBUG] Total queries after deduplication: {}",
+        queries.len()
+    );
     Ok(queries)
 }
 
 fn find_mongo_queries(content: &str, file_path: &str, service_name: &str) -> Vec<MongoQuery> {
-    let mut queries = Vec::new();
-
-    // Updated MongoDB patterns for TypeScript - ordered to avoid overlaps
-    let mongo_patterns = [
-        // Pattern 1: Model access: this.productModel.find() - most specific first
-        Regex::new(r"this\.([a-z]\w*Model)\.(find|findOne|aggregate|count|countDocuments|distinct)\(").unwrap(),
-        // Pattern 2: connection.useDb().collection().find()
-        Regex::new(r#"connection\.useDb\([^)]+\)\.collection\(\s*['"]([^'"]+)['"]\s*\)\.(find|findOne|aggregate|count|countDocuments|distinct)\("#).unwrap(),
-        // Pattern 3: Direct collection access: collection("name").find()
-        Regex::new(r#"(?:\w+\.)?collection\(\s*['"]([^'"]+)['"]\s*\)\.(find|findOne|aggregate|count|countDocuments|distinct)\("#).unwrap(),
-        // Pattern 4: this.collection.find()
-        Regex::new(r"this\.collection\.(find|findOne|aggregate|count|countDocuments|distinct)\(").unwrap(),
-        // Pattern 5: Repository pattern
-        Regex::new(r"repository\.(find|findOne|aggregate|count|countDocuments|distinct)\(").unwrap(),
-    ];
-
-    let lines: Vec<&str> = content.lines().collect();
-    let mut matched_lines = std::collections::HashSet::new();
-
-    for (line_idx, line) in lines.iter().enumerate() {
-        // Skip if this line was already matched by a more specific pattern
-        if matched_lines.contains(&line_idx) {
-            continue;
-        }
-
-        for (pattern_idx, pattern) in mongo_patterns.iter().enumerate() {
-            if let Some(caps) = pattern.captures(line) {
-                let method = caps
-                    .get(if pattern_idx == 0 || pattern_idx == 1 {
-                        2
-                    } else {
-                        1
-                    })
-                    .map(|m| m.as_str())
-                    .unwrap_or("unknown");
-
-                let collection = extract_collection_name_from_pattern(line, pattern_idx)
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Extract multi-line query object
-                let query_start_line = line_idx;
-                let (query_fields, query_end_line) =
-                    extract_fields_multiline(&lines, query_start_line);
-
-                // Create the raw match string
-                let raw_match = lines[query_start_line..=query_end_line.min(lines.len() - 1)]
-                    .iter()
-                    .map(|&s| s.trim())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                queries.push(MongoQuery {
-                    file: file_path.to_string(),
-                    line: query_start_line + 1,
-                    service: service_name.to_string(),
-                    collection,
-                    method: method.to_string(),
-                    query_fields,
-                    raw_match,
-                });
-
-                // Mark this line as matched to prevent duplicates
-                matched_lines.insert(line_idx);
-                break; // Stop checking other patterns for this line
-            }
-        }
-    }
-
-    queries
-}
-
-fn extract_fields_multiline(lines: &[&str], start_line: usize) -> (Vec<String>, usize) {
-    let mut brace_count = 0;
-    let mut in_object = false;
-    let mut end_line = start_line;
-
-    // Find the opening brace on the start line or subsequent lines
-    for (line_offset, &line) in lines[start_line..].iter().enumerate() {
-        end_line = start_line + line_offset;
-
-        // Count braces to track object boundaries
-        for ch in line.chars() {
-            if ch == '{' {
-                brace_count += 1;
-                in_object = true;
-            } else if ch == '}' {
-                brace_count -= 1;
-                if brace_count == 0 && in_object {
-                    // End of object found, extract fields from this range
-                    let object_content = lines[start_line..=end_line]
-                        .iter()
-                        .map(|&s| s.trim())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-
-                    let fields = extract_fields_from_object(&object_content);
-                    return (fields, end_line);
-                }
-            }
-        }
-
-        // If we've gone too far without finding a complete object, break
-        if line_offset > 10 && brace_count == 0 {
-            break;
-        }
-    }
-
-    // If no complete object found, try to extract from what we have
-    let partial_content = lines[start_line..=end_line.min(lines.len() - 1)]
-        .iter()
-        .map(|&s| s.trim())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let fields = extract_fields_from_object(&partial_content);
-    (fields, end_line)
-}
-
-fn extract_fields_from_object(content: &str) -> Vec<String> {
-    let mut fields = Vec::new();
-
-    // Pattern to find field names in object literals
-    let field_pattern = Regex::new(r#"([a-zA-Z_]\w*)\s*:"#).unwrap();
-
-    // Find all field name matches
-    for caps in field_pattern.captures_iter(content) {
-        if let Some(field_match) = caps.get(1) {
-            let field = field_match.as_str();
-            // Filter out common non-field identifiers
-            if field != "new"
-                && field != "Object"
-                && field != "this"
-                && !field.starts_with("$")
-                && !fields.contains(&field.to_string())
-            {
-                fields.push(field.to_string());
-            }
-        }
-    }
-
-    // Handle special MongoDB operators and extract field names from them
-    let operator_patterns = [
-        Regex::new(r#"\$or\s*:\s*\[\s*\{([^}]+)\}"#).unwrap(),
-        Regex::new(r#"\$and\s*:\s*\[\s*\{([^}]+)\}"#).unwrap(),
-        Regex::new(r#"\$regex\s*:\s*['"]([^'"]+)['"]"#).unwrap(),
-    ];
-
-    for pattern in &operator_patterns {
-        for caps in pattern.captures_iter(content) {
-            if let Some(field_match) = caps.get(1) {
-                let field_content = field_match.as_str();
-                // Extract field names from operator content
-                for field_caps in field_pattern.captures_iter(field_content) {
-                    if let Some(f) = field_caps.get(1) {
-                        let field = f.as_str();
-                        if !fields.contains(&field.to_string()) {
-                            fields.push(field.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fields.sort();
-    fields
-}
-
-fn extract_collection_name_from_pattern(line: &str, pattern_idx: usize) -> Option<String> {
-    match pattern_idx {
-        0 => {
-            // this.productModel pattern - extract from model name
-            let re = Regex::new(r"this\.([a-z]\w*Model)").unwrap();
-            re.captures(line).map(|caps| {
-                let model_name = &caps[1];
-                // Remove "Model" suffix and convert to lowercase
-                model_name.replace("Model", "").to_lowercase()
-            })
-        }
-        1 => {
-            // connection.useDb().collection().find() pattern
-            let re = Regex::new(r#"collection\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-            re.captures(line).map(|caps| caps[1].to_string())
-        }
-        2 => {
-            // collection("name") pattern
-            let re = Regex::new(r#"collection\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-            re.captures(line).map(|caps| caps[1].to_string())
-        }
-        3 => {
-            // this.collection pattern
-            Some("this.collection".to_string())
-        }
-        4 => {
-            // repository pattern
-            let re = Regex::new(r"repository\.(\w+)").unwrap();
-            re.captures(line)
-                .map(|caps| format!("repository.{}", caps[1].to_lowercase()))
-        }
-        _ => None,
-    }
+    ast_parser::parse_file(content, file_path, service_name)
 }
 
 fn find_ts_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -413,7 +263,7 @@ pub fn get_detailed_field_analysis(
 
         let coll_data = collection_data
             .entry(query.collection.clone())
-            .or_insert_with(|| CollectionData::new());
+            .or_insert_with(CollectionData::new);
 
         // Track file usage
         *coll_data.file_usage.entry(query.file.clone()).or_insert(0) += 1;
@@ -436,14 +286,10 @@ pub fn get_detailed_field_analysis(
     let mut analyses: Vec<CollectionFieldAnalysis> = collection_data
         .into_iter()
         .map(|(collection, data)| {
-            let mut files: Vec<_> = data
-                .file_usage
-                .into_iter()
-                .map(|(file, count)| (file, count))
-                .collect();
+            let mut files: Vec<_> = data.file_usage.into_iter().collect();
             files.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by query count descending
 
-            let mut fields: Vec<_> = data.field_usage.into_iter().map(|(_, info)| info).collect();
+            let mut fields: Vec<_> = data.field_usage.into_values().collect();
             fields.sort_by(|a, b| b.total_usage.cmp(&a.total_usage)); // Sort by usage descending
 
             CollectionFieldAnalysis {
