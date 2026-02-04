@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 
 @Injectable()
 export class VariableQueryService {
-    constructor(@InjectModel('User') private userModel: Model<any>) { }
+    constructor(@InjectModel('users') private userModel: Model<any>) { }
 
     async findActiveUsers() {
         // This query is defined in a variable

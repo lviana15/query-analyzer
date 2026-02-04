@@ -43,6 +43,24 @@ impl fmt::Display for IndexSuggestion {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryPattern {
+    pub fields: Vec<String>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileAnalysis {
+    pub file_path: String,
+    pub patterns: Vec<QueryPattern>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionAnalysis {
+    pub collection: String,
+    pub files: Vec<FileAnalysis>,
+}
+
 pub fn analyze_project(root_dir: &Path) -> Result<Vec<MongoQuery>, Box<dyn std::error::Error>> {
     let ts_files = find_ts_files(root_dir);
 
@@ -154,4 +172,62 @@ fn generate_suggestions_for_collection(
     }
 
     suggestions
+}
+
+pub fn get_collection_analysis(queries: &[MongoQuery]) -> Vec<CollectionAnalysis> {
+    // Collection -> File -> Pattern(joined string) -> Count
+    let mut data: HashMap<String, HashMap<String, HashMap<String, usize>>> = HashMap::new();
+
+    for query in queries {
+        let files_map = data.entry(query.collection.clone()).or_default();
+        let patterns_map = files_map.entry(query.file.clone()).or_default();
+
+        // Create a sorted key for the pattern to identify identical sets of fields
+        let mut fields = query.query_fields.clone();
+        fields.sort();
+        let pattern_key = fields.join(","); // Empty string for no fields
+
+        *patterns_map.entry(pattern_key).or_insert(0) += 1;
+    }
+
+    // Convert HashMap to structured Vectors and sort
+    let mut result: Vec<CollectionAnalysis> = data
+        .into_iter()
+        .map(|(collection, files_map)| {
+            let mut files: Vec<FileAnalysis> = files_map
+                .into_iter()
+                .map(|(file_path, patterns_map)| {
+                    let mut patterns: Vec<QueryPattern> = patterns_map
+                        .into_iter()
+                        .map(|(key, count)| {
+                            let fields = if key.is_empty() {
+                                Vec::new()
+                            } else {
+                                key.split(',').map(|s| s.to_string()).collect()
+                            };
+                            QueryPattern { fields, count }
+                        })
+                        .collect();
+
+                    // Sort patterns by count (descending)
+                    patterns.sort_by(|a, b| b.count.cmp(&a.count));
+
+                    FileAnalysis {
+                        file_path,
+                        patterns,
+                    }
+                })
+                .collect();
+
+            // Sort files alphabetically
+            files.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+
+            CollectionAnalysis { collection, files }
+        })
+        .collect();
+
+    // Sort collections alphabetically
+    result.sort_by(|a, b| a.collection.cmp(&b.collection));
+
+    result
 }
