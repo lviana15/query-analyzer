@@ -50,7 +50,7 @@ cargo clippy -- -D warnings
 
 ### Naming Conventions
 - **Functions/Vars**: `snake_case` (e.g., `find_mongo_queries`)
-- **Types**: `PascalCase` (e.g., `MongoQuery`, `IndexSuggestion`)
+- **Types**: `PascalCase` (e.g., `MongoQuery`, `IndexSuggestion`, `CollectionAnalysis`)
 - **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `IGNORED_DIRS`)
 
 ### Error Handling
@@ -85,6 +85,7 @@ We use `swc_core` and `swc_ecma_parser`.
 - **Visitor Pattern**: Implement `Visit` trait for `MongoQueryVisitor`.
 - **Method Detection**: `visit_call_expr` detects method calls.
 - **Mongoose Support**: `visit_constructor` scans for `@InjectModel`.
+- **Variable Tracking**: `visit_var_decl` tracks local object variables to support indirect query passing (e.g. `find(query)`).
 - **Field Extraction**: Recursively traverse `ObjectLit` nodes.
 
 ### File Traversal (WalkDir)
