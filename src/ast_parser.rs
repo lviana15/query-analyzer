@@ -9,7 +9,7 @@ pub struct MongoQueryVisitor<'a> {
     pub queries: Vec<MongoQuery>,
     pub source_map: &'a SourceMap,
     pub file_path: String,
-    pub model_map: HashMap<String, String>, // property_name -> collection_name
+    pub model_map: HashMap<String, String>,
 }
 
 impl<'a> MongoQueryVisitor<'a> {
