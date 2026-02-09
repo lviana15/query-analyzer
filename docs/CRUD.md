@@ -3,6 +3,11 @@
 CRUD operations *create*, *read*, *update*, and *delete*
 [documents](https://mongodbcom-cdn.staging.corp.mongodb.com/docs/core/document/#std-label-bson-document-format).
 
+**Note on Analysis:** The `mongo-analyzer` tool inspects specific arguments of these methods to extract query predicates.
+- For **Read** and **Delete** operations, it analyzes the first argument (filter).
+- For **Update** operations, it analyzes only the first argument (filter) and ignores the update document (second argument).
+- For **Distinct**, it analyzes the second argument (conditions).
+
 You can connect with driver methods and perform CRUD operations for deployments hosted in the following environments:
 
 [perform CRUD operations in the UI](https://www.mongodb.com/docs/atlas/atlas-ui/documents/)You can [perform CRUD operations in the UI](https://www.mongodb.com/docs/atlas/atlas-ui/documents/) for deployments hosted in [MongoDB Atlas](https://www.mongodb.com/docs/atlas).
@@ -72,5 +77,3 @@ For examples, see [Delete Documents](https://mongodbcom-cdn.staging.corp.mongodb
 ## Bulk Write
 
 MongoDB provides the ability to perform write operations in bulk. For details, see [Bulk Write Operations](https://mongodbcom-cdn.staging.corp.mongodb.com/docs/core/bulk-write-operations/).
-
-

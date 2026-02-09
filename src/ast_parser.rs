@@ -174,8 +174,9 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
         if let Some((collection, method)) = self.analyze_callee(&n.callee) {
             let args_to_check: &[usize] = match method.as_str() {
                 "find" | "findOne" | "count" | "countDocuments" | "deleteMany" | "deleteOne"
-                | "distinct" | "aggregate" => &[0],
-                "updateOne" | "updateMany" | "findOneAndUpdate" | "findOneAndReplace" => &[0, 1],
+                | "aggregate" => &[0],
+                "distinct" => &[1],
+                "updateOne" | "updateMany" | "findOneAndUpdate" | "findOneAndReplace" => &[0],
                 _ => &[],
             };
 
@@ -207,7 +208,9 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
 
             let loc = self.source_map.lookup_char_pos(n.span.lo);
 
-            let predicate = if let Some(arg) = n.args.first() {
+            let predicate_arg_idx = if method.as_str() == "distinct" { 1 } else { 0 };
+
+            let predicate = if let Some(arg) = n.args.get(predicate_arg_idx) {
                 self.source_map
                     .span_to_snippet(arg.span())
                     .unwrap_or_else(|_| "...".to_string())
