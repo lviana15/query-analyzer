@@ -15,7 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Analyze,
+    Analyze {
+        #[arg(short, long)]
+        verbose: bool,
+    },
     Indexes,
 }
 
@@ -23,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Analyze => {
+        Commands::Analyze { verbose } => {
             let results = analyze_project(&cli.directory)?;
             let analysis = get_collection_analysis(&results);
 
@@ -45,6 +48,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             format!("[{}]", pattern.fields.join(", "))
                         };
                         println!("    - {}: {} usages", fields_str, pattern.count);
+
+                        if verbose {
+                            let mut queries = pattern.queries.clone();
+                            queries.sort_by_key(|q| q.line);
+                            for query in queries {
+                                println!("      Line {}: {}", query.line, query.raw_match);
+                            }
+                        }
                     }
                 }
                 println!();

@@ -1,6 +1,6 @@
 use crate::MongoQuery;
 use std::collections::HashMap;
-use swc_core::common::{sync::Lrc, FileName, SourceMap};
+use swc_core::common::{sync::Lrc, FileName, SourceMap, SourceMapper, Spanned};
 use swc_core::ecma::ast::*;
 use swc_core::ecma::visit::{Visit, VisitWith};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsSyntax};
@@ -11,8 +11,6 @@ const QUERY_METHODS: &[&str] = &[
     "findOneAndUpdate",
     "findOneAndDelete",
     "findOneAndReplace",
-    "insertOne",
-    "insertMany",
     "updateOne",
     "updateMany",
     "deleteOne",
@@ -176,7 +174,7 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
         if let Some((collection, method)) = self.analyze_callee(&n.callee) {
             let args_to_check: &[usize] = match method.as_str() {
                 "find" | "findOne" | "count" | "countDocuments" | "deleteMany" | "deleteOne"
-                | "distinct" | "insertOne" | "insertMany" | "aggregate" => &[0],
+                | "distinct" | "aggregate" => &[0],
                 "updateOne" | "updateMany" | "findOneAndUpdate" | "findOneAndReplace" => &[0, 1],
                 _ => &[],
             };
@@ -208,7 +206,16 @@ impl<'a> Visit for MongoQueryVisitor<'a> {
             fields.dedup();
 
             let loc = self.source_map.lookup_char_pos(n.span.lo);
-            let raw_match = format!("{}.{}(...)", collection, method);
+
+            let predicate = if let Some(arg) = n.args.first() {
+                self.source_map
+                    .span_to_snippet(arg.span())
+                    .unwrap_or_else(|_| "...".to_string())
+            } else {
+                "".to_string()
+            };
+
+            let raw_match = format!("{}.{}({})", collection, method, predicate);
 
             self.queries.push(MongoQuery {
                 file: self.file_path.clone(),

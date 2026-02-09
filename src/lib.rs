@@ -47,6 +47,7 @@ impl fmt::Display for IndexSuggestion {
 pub struct QueryPattern {
     pub fields: Vec<String>,
     pub count: usize,
+    pub queries: Vec<MongoQuery>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,8 +176,9 @@ fn generate_suggestions_for_collection(
 }
 
 pub fn get_collection_analysis(queries: &[MongoQuery]) -> Vec<CollectionAnalysis> {
-    // Collection -> File -> Pattern(joined string) -> Count
-    let mut data: HashMap<String, HashMap<String, HashMap<String, usize>>> = HashMap::new();
+    // Collection -> File -> Pattern(joined string) -> List of queries
+    let mut data: HashMap<String, HashMap<String, HashMap<String, Vec<MongoQuery>>>> =
+        HashMap::new();
 
     for query in queries {
         let files_map = data.entry(query.collection.clone()).or_default();
@@ -187,7 +189,10 @@ pub fn get_collection_analysis(queries: &[MongoQuery]) -> Vec<CollectionAnalysis
         fields.sort();
         let pattern_key = fields.join(","); // Empty string for no fields
 
-        *patterns_map.entry(pattern_key).or_insert(0) += 1;
+        patterns_map
+            .entry(pattern_key)
+            .or_default()
+            .push(query.clone());
     }
 
     // Convert HashMap to structured Vectors and sort
@@ -199,13 +204,18 @@ pub fn get_collection_analysis(queries: &[MongoQuery]) -> Vec<CollectionAnalysis
                 .map(|(file_path, patterns_map)| {
                     let mut patterns: Vec<QueryPattern> = patterns_map
                         .into_iter()
-                        .map(|(key, count)| {
+                        .map(|(key, queries)| {
                             let fields = if key.is_empty() {
                                 Vec::new()
                             } else {
                                 key.split(',').map(|s| s.to_string()).collect()
                             };
-                            QueryPattern { fields, count }
+                            let count = queries.len();
+                            QueryPattern {
+                                fields,
+                                count,
+                                queries,
+                            }
                         })
                         .collect();
 
