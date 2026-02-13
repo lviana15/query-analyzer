@@ -15,7 +15,6 @@ Key locations:
 
 ## Build, Lint, and Test Commands
 
-Essential commands:
 ```bash
 # Build
 cargo build
@@ -36,28 +35,26 @@ cargo test
 
 Run a single test:
 ```bash
-# By test name substring (unit tests)
+# By test name substring
 cargo test <test_name>
 
-# More precise: module path (example)
+# More precise: module path
 cargo test ast_parser::tests::parses_find_query
 
-# Show stdout/stderr from tests
+# Show stdout/stderr
 cargo test <test_name> -- --nocapture
 
 # Only library tests
 cargo test --lib <test_name>
 ```
 
-Notes:
-- There are no custom Makefile/Justfile tasks.
-- Use `cargo fmt` before committing changes.
+No custom Makefile/Justfile tasks. Use `cargo fmt` before committing.
 
 ## Code Style Guidelines
 
 ### Imports
-- Group imports in this order: `std`, external crates, then `crate::`.
-- Prefer explicit imports over glob re-exports to keep call sites clear.
+- Group: `std`, external crates, then `crate::`.
+- Prefer explicit imports over glob re-exports.
 
 ### Formatting
 - Default Rust style (`cargo fmt`) with ~100 char line width.
@@ -72,7 +69,7 @@ Notes:
 ### Types and Data Modeling
 - Prefer strong types and enums over stringly-typed maps.
 - Use `Vec<T>` for ordered output and sort deterministically before printing.
-- Implement `Display` for user-facing output (see `IndexSuggestion`).
+- Implement `Display` for user-facing output.
 
 ### Error Handling
 - Top-level functions return `Result<T, Box<dyn std::error::Error>>`.
@@ -82,20 +79,16 @@ Notes:
 
 ### Collections and Sorting
 - Deduplicate and sort results for stable output.
-- In `src/lib.rs`, sort by file, line, and method.
-- When aggregating, sort maps into vectors before returning or printing.
-
-### Control Flow
-- Prefer `match` / `if let` over nested `if` chains.
-- Keep AST visitor logic in `MongoQueryVisitor` and delegate helpers.
+- Sort by file, line, and method.
+- Sort maps into vectors before returning or printing.
 
 ## AST Parsing Conventions (SWC)
 
-- Use the SWC visitor pattern (`Visit`) and call `visit_children_with`.
-- Keep AST extraction and analysis in `src/ast_parser.rs`.
+- Use SWC visitor pattern (`Visit`) and call `visit_children_with`.
+- Keep AST extraction in `src/ast_parser.rs`.
 - Track local object literals to resolve identifier-based queries.
 - Treat `$`-prefixed keys as operators and drill into nested objects.
-- When a query arg is an array of objects, merge extracted fields.
+- When query arg is an array of objects, merge extracted fields.
 
 Relevant helpers:
 - `QUERY_METHODS` lists supported MongoDB methods.
@@ -105,13 +98,13 @@ Relevant helpers:
 ## File Traversal
 
 - Use `walkdir::WalkDir` with `filter_entry` to avoid large directories.
-- Ignore `node_modules`, `.git`, `dist`, and `target`.
+- Ignore `node_modules`, `.git`, `dist`, `target`.
 - Only scan `.ts` and `.tsx` files.
 - Exclude test files (`*.spec.ts`, `*.test.ts`).
 
 ## Testing Strategy
 
-- Unit tests live in the same module under `#[cfg(test)]`.
+- Unit tests in same module under `#[cfg(test)]`.
 - Use inline TypeScript snippets to test AST parsing.
 - Assert on `MongoQuery` fields: collection, method, fields, line.
 - Add tests when introducing new query methods or collection resolvers.
@@ -120,48 +113,42 @@ Relevant helpers:
 
 - CLI uses `clap` with subcommands (`analyze`, `indexes`).
 - Keep output readable and stable; avoid reordering without intent.
-- For printing paths, prefer the file name when possible (see `main.rs`).
+- For paths, prefer file name when possible.
 
-CLI usage examples:
+Usage:
 ```bash
-# Analyze queries in current directory
 mongo-analyzer analyze
-
-# Analyze queries in a specific project
 mongo-analyzer --directory /path/to/project analyze
 ```
 
 ## Output and Determinism
 
-- Keep ordering stable to make diffs easy to review.
-- Prefer deterministic sorting over HashMap iteration order.
-- Avoid adding noisy debug output to CLI paths.
+- Keep ordering stable for easy diff review.
+- Prefer deterministic sorting over HashMap iteration.
 - Use clear, human-readable wording in `Display` implementations.
 
 ## Performance and Safety
 
-- Avoid loading large directories by extending `IGNORED_DIRS` only when needed.
-- Reuse parsed data rather than re-walking the filesystem.
+- Avoid loading large directories; extend `IGNORED_DIRS` sparingly.
+- Reuse parsed data rather than re-walking filesystem.
 - Keep recursion in AST visitors bounded and defensive.
-- When in doubt, skip unrecognized AST shapes instead of panicking.
+- Skip unrecognized AST shapes instead of panicking.
 
 ## Reference Documentation
 
-For detailed MongoDB syntax and concepts, refer to the following helper files in the `docs/` directory:
-
-- `docs/QUERY_SYNTAX.md`: Common query operators ($eq, $gt, $in) and logical operators.
-- `docs/AGGREGATION_SYNTAX.md`: Aggregation pipeline stages ($match, $group, $lookup) and accumulators.
-- `docs/CRUD.md`: High-level overview of Create, Read, Update, Delete operations.
-- `docs/PERFORMANCE.md`: Performance tuning, indexes, and metrics.
-- `docs/GLOSSARY.md`: Definitions of MongoDB terms.
+See `docs/` directory:
+- `QUERY_SYNTAX.md`: Query operators ($eq, $gt, $in), logical operators.
+- `AGGREGATION_SYNTAX.md`: Pipeline stages, accumulators.
+- `CRUD.md`: Create, Read, Update, Delete operations.
+- `PERFORMANCE.md`: Tuning, indexes, metrics.
+- `GLOSSARY.md`: MongoDB term definitions.
 
 ## Cursor / Copilot Rules
 
-- No `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`
-  were found in the repo at the time of writing.
+No `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` found.
 
 ## Agent Notes
 
 - Preserve existing logic and ordering when making changes.
 - Avoid large refactors unless requested.
-- Keep functions small and focused, especially in the AST visitor.
+- Keep functions small and focused, especially in AST visitor.

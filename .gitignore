@@ -33,3 +33,5 @@ node_modules/
 # Distribution/packaging
 dist/
 build/
+
+examples/
