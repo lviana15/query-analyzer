@@ -1,0 +1,68 @@
+{
+  "defaults": {
+    "unknownCollectionSeverity": "warning",
+    "recommendedPredicateMissSeverity": "warning"
+  },
+  "collections": [
+    {
+      "name": "users",
+      "highVolume": true,
+      "indexes": [
+        {
+          "name": "users_email_unique",
+          "keys": [
+            {
+              "field": "email",
+              "order": 1
+            }
+          ],
+          "unique": true
+        },
+        {
+          "name": "users_org_created",
+          "keys": [
+            {
+              "field": "organizationId",
+              "order": 1
+            },
+            {
+              "field": "createdAt",
+              "order": -1
+            }
+          ]
+        }
+      ],
+      "predicateGuidance": {
+        "recommendedFields": [
+          "organizationId",
+          "tenantId"
+        ],
+        "severity": "warning",
+        "methods": {
+          "find": [
+            "organizationId",
+            "tenantId"
+          ],
+          "updateMany": [
+            "organizationId"
+          ]
+        }
+      },
+      "performance": {
+        "unboundedFind": {
+          "severity": "warning"
+        },
+        "sortWithoutIndex": {
+          "severity": "warning"
+        },
+        "regexWithoutPrefix": {
+          "severity": "info"
+        },
+        "maxFieldsInPredicate": {
+          "value": 8,
+          "severity": "info"
+        }
+      }
+    }
+  ]
+}

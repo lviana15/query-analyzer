@@ -3,7 +3,7 @@
 CRUD operations *create*, *read*, *update*, and *delete*
 [documents](https://mongodbcom-cdn.staging.corp.mongodb.com/docs/core/document/#std-label-bson-document-format).
 
-**Note on Analysis:** The `mongo-analyzer` tool inspects specific arguments of these methods to extract query predicates.
+**Note on Analysis:** The `redshift` tool inspects specific arguments of these methods to extract query predicates.
 - For **Read** and **Delete** operations, it analyzes the first argument (filter).
 - For **Update** operations, it analyzes only the first argument (filter) and ignores the update document (second argument).
 - For **Distinct**, it analyzes the second argument (conditions).

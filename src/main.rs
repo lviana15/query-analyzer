@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
-use mongo_analyzer::{analyze_project, get_collection_analysis, get_indexes};
+use redshift::config::load_project_config;
+use redshift::{analyze_project, get_collection_analysis, get_config_warnings, get_indexes};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "mongo-analyzer")]
+#[command(name = "redshift")]
 #[command(about = "Tool to analyze MongoDB queries in TypeScript projects")]
 struct Cli {
     #[arg(short, long, default_value = ".")]
@@ -29,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Analyze { verbose } => {
             let results = analyze_project(&cli.directory)?;
             let analysis = get_collection_analysis(&results);
+            let loaded_config = load_project_config(&cli.directory)?;
 
             for collection_data in &analysis {
                 println!("Collection: {}", collection_data.collection);
@@ -58,6 +60,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                println!();
+            }
+
+            if let Some(loaded_config) = loaded_config {
+                let warnings = get_config_warnings(&results, &loaded_config.config);
+                if !warnings.is_empty() {
+                    println!("Config: {}", loaded_config.path.display());
+                    println!("Warnings:");
+                    for warning in warnings {
+                        match (&warning.file, warning.line) {
+                            (Some(file), Some(line)) => {
+                                println!(
+                                    "  [{}] {}:{} - {}",
+                                    warning.severity.as_str(),
+                                    file,
+                                    line,
+                                    warning.message
+                                );
+                            }
+                            _ => {
+                                println!("  [{}] {}", warning.severity.as_str(), warning.message);
+                            }
+                        }
+                    }
+                    println!();
+                }
+            } else {
+                println!("Config: no redshift.config.json found (using defaults)");
                 println!();
             }
         }

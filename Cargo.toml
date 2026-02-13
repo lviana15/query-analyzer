@@ -1,23 +1,25 @@
 [package]
-name = "mongo-analyzer"
+name = "redshift"
 version = "0.1.0"
 edition = "2021"
-description = "Comprehensive MongoDB query analysis tool for NestJS projects"
-authors = ["Your Name <your.email@example.com>"]
+description = "Comprehensive MongoDB analysis tool for typescript projects"
+authors = ["Lucas <lucasviana0604@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/yourusername/mongo-analyzer"
-homepage = "https://github.com/yourusername/mongo-analyzer"
-documentation = "https://docs.rs/mongo-analyzer"
+repository = "https://github.com/lviana15/redshift"
+homepage = "https://github.com/lviana15/redshift"
+documentation = "https://docs.rs/redshift"
 readme = "README.md"
-keywords = ["mongodb", "nestjs", "typescript", "cli", "analyzer"]
+keywords = ["mongodb", "typescript", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
-name = "mongo-analyzer"
+name = "redshift"
 path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 swc_core = { version = "56.0.0", features = ["common", "ecma_parser", "ecma_ast", "ecma_visit"] }
 swc_ecma_parser = "33.0.1"
 walkdir = "2.5.0"

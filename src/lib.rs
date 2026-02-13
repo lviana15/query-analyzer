@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub mod ast_parser;
+pub mod config;
+
+use crate::config::{AnalyzerConfig, ConfigWarning, Severity};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MongoQuery {
@@ -240,4 +243,183 @@ pub fn get_collection_analysis(queries: &[MongoQuery]) -> Vec<CollectionAnalysis
     result.sort_by(|a, b| a.collection.cmp(&b.collection));
 
     result
+}
+
+pub fn get_config_warnings(queries: &[MongoQuery], config: &AnalyzerConfig) -> Vec<ConfigWarning> {
+    let mut warnings = Vec::new();
+
+    let collections_by_name: HashMap<&str, _> = config
+        .collections
+        .iter()
+        .map(|collection| (collection.name.as_str(), collection))
+        .collect();
+
+    let mut unknown_collection_counts: HashMap<&str, usize> = HashMap::new();
+    for query in queries {
+        if !collections_by_name.contains_key(query.collection.as_str()) {
+            *unknown_collection_counts
+                .entry(query.collection.as_str())
+                .or_insert(0) += 1;
+        }
+    }
+
+    let mut unknown_collections: Vec<_> = unknown_collection_counts.into_iter().collect();
+    unknown_collections.sort_by(|a, b| a.0.cmp(b.0));
+    for (collection, count) in unknown_collections {
+        warnings.push(ConfigWarning {
+            severity: config.defaults.unknown_collection_severity(),
+            message: format!(
+                "Collection '{}' is queried {} times but is not configured",
+                collection, count
+            ),
+            file: None,
+            line: None,
+        });
+    }
+
+    for query in queries {
+        let Some(collection_config) = collections_by_name.get(query.collection.as_str()) else {
+            continue;
+        };
+        let Some(guidance) = &collection_config.predicate_guidance else {
+            continue;
+        };
+
+        let recommended = guidance
+            .methods
+            .get(query.method.as_str())
+            .unwrap_or(&guidance.recommended_fields);
+        if recommended.is_empty() {
+            continue;
+        }
+
+        let has_recommended_field = query
+            .query_fields
+            .iter()
+            .any(|field| recommended.contains(field));
+
+        if !has_recommended_field {
+            let severity = guidance
+                .severity
+                .unwrap_or(config.defaults.recommended_predicate_miss_severity());
+            warnings.push(ConfigWarning {
+                severity,
+                message: format!(
+                    "Query on collection '{}' with method '{}' should include one of [{}] in predicate",
+                    query.collection,
+                    query.method,
+                    recommended.join(", ")
+                ),
+                file: Some(query.file.clone()),
+                line: Some(query.line),
+            });
+        }
+    }
+
+    warnings.sort_by(|a, b| {
+        severity_rank(a.severity)
+            .cmp(&severity_rank(b.severity))
+            .then(a.file.cmp(&b.file))
+            .then(a.line.cmp(&b.line))
+            .then(a.message.cmp(&b.message))
+    });
+
+    warnings
+}
+
+fn severity_rank(severity: Severity) -> usize {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+        Severity::Info => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::AnalyzerConfig;
+
+    use super::{get_config_warnings, MongoQuery};
+
+    #[test]
+    fn emits_unknown_collection_warning() {
+        let config: AnalyzerConfig = serde_json::from_str(
+            r#"{
+                "collections": [{"name": "users"}]
+            }"#,
+        )
+        .unwrap();
+
+        let queries = vec![MongoQuery {
+            file: "src/user.service.ts".to_string(),
+            line: 10,
+            collection: "orders".to_string(),
+            method: "find".to_string(),
+            query_fields: vec!["organizationId".to_string()],
+            raw_match: "orders.find({ organizationId })".to_string(),
+        }];
+
+        let warnings = get_config_warnings(&queries, &config);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("orders"));
+    }
+
+    #[test]
+    fn emits_recommended_predicate_warning() {
+        let config: AnalyzerConfig = serde_json::from_str(
+            r#"{
+                "collections": [{
+                    "name": "users",
+                    "predicateGuidance": {
+                        "recommendedFields": ["organizationId"]
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let queries = vec![MongoQuery {
+            file: "src/user.service.ts".to_string(),
+            line: 15,
+            collection: "users".to_string(),
+            method: "find".to_string(),
+            query_fields: vec!["email".to_string()],
+            raw_match: "users.find({ email })".to_string(),
+        }];
+
+        let warnings = get_config_warnings(&queries, &config);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("organizationId"));
+    }
+
+    #[test]
+    fn method_specific_recommendation_overrides_collection_default() {
+        let config: AnalyzerConfig = serde_json::from_str(
+            r#"{
+                "collections": [{
+                    "name": "users",
+                    "predicateGuidance": {
+                        "recommendedFields": ["organizationId"],
+                        "methods": {
+                            "find": ["email"]
+                        }
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let queries = vec![MongoQuery {
+            file: "src/user.service.ts".to_string(),
+            line: 20,
+            collection: "users".to_string(),
+            method: "find".to_string(),
+            query_fields: vec!["organizationId".to_string()],
+            raw_match: "users.find({ organizationId })".to_string(),
+        }];
+
+        let warnings = get_config_warnings(&queries, &config);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("email"));
+    }
 }

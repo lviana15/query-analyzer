@@ -1,4 +1,4 @@
-# Roadmap: Static Analysis Extensions for mongo-analyzer
+# Roadmap: Static Analysis Extensions for redshift
 
 This document lists candidate features that are possible using static analysis
 of server-side code only, plus explicit limitations. It also includes relevant

@@ -1,154 +1,157 @@
 # AGENTS.md
 
-Guidelines for agentic coding agents working in the `mongo-analyzer` Rust repo.
+Guidance for agentic coding assistants working in this repository.
 
-## Project Overview
+## Project Snapshot
+`redshift` is a Rust CLI + library that statically analyzes MongoDB query
+usage in TypeScript/NestJS codebases.
+Core responsibilities:
+- Parse TS/TSX source with SWC AST visitors.
+- Extract query method calls, collections, fields, and source line numbers.
+- Aggregate usage and suggest indexes.
+High-value files:
+- `src/ast_parser.rs`: SWC parsing and AST traversal (`Visit` implementation).
+- `src/lib.rs`: file traversal, query aggregation, index suggestions.
+- `src/main.rs`: `clap` CLI entrypoint and output rendering.
+- `README.md`: quick run examples.
 
-`mongo-analyzer` is a CLI tool and library for analyzing MongoDB query usage in
-TypeScript/NestJS projects. It parses TypeScript ASTs with SWC to extract query
-methods, fields, and usage patterns.
-
-Key locations:
-- `src/ast_parser.rs` parses TypeScript ASTs (SWC) and collects `MongoQuery`.
-- `src/lib.rs` orchestrates file traversal and aggregation helpers.
-- `src/main.rs` implements the CLI using `clap`.
-
-## Build, Lint, and Test Commands
-
+## Build, Check, Lint, and Test Commands
+Use Cargo only (no Makefile/Justfile tasks).
 ```bash
-# Build
+# Fast compile checks
+cargo check
+
+# Build debug/release binaries
 cargo build
 cargo build --release
 
-# Fast type-check
-cargo check
-
-# Format
+# Format code (run before commit)
 cargo fmt
 
-# Lint (treat warnings as errors)
+# Lint strictly (warnings denied)
 cargo clippy -- -D warnings
 
 # Run all tests
 cargo test
 ```
-
-Run a single test:
+Single-test workflows (important):
 ```bash
-# By test name substring
-cargo test <test_name>
+# Run tests matching a substring
+cargo test <test_name_substring>
 
-# More precise: module path
+# Run an exact module::path style test
 cargo test ast_parser::tests::parses_find_query
 
-# Show stdout/stderr
-cargo test <test_name> -- --nocapture
+# Run a single test and print output
+cargo test <test_name_substring> -- --nocapture
 
-# Only library tests
-cargo test --lib <test_name>
+# Restrict to library tests only
+cargo test --lib <test_name_substring>
+
+# Run one exact test by full name without fuzzy matching
+cargo test -- --exact ast_parser::tests::parses_find_query
 ```
-
-No custom Makefile/Justfile tasks. Use `cargo fmt` before committing.
-
-## Code Style Guidelines
-
-### Imports
-- Group: `std`, external crates, then `crate::`.
-- Prefer explicit imports over glob re-exports.
-
-### Formatting
-- Default Rust style (`cargo fmt`) with ~100 char line width.
-- Use trailing commas in multi-line structs, enums, and function args.
-- Prefer early returns to reduce nesting.
-
-### Naming Conventions
-- Functions/vars: `snake_case` (e.g., `find_mongo_queries`).
-- Types/traits: `PascalCase` (e.g., `MongoQuery`, `IndexSuggestion`).
-- Constants: `SCREAMING_SNAKE_CASE` (e.g., `QUERY_METHODS`).
-
-### Types and Data Modeling
-- Prefer strong types and enums over stringly-typed maps.
-- Use `Vec<T>` for ordered output and sort deterministically before printing.
-- Implement `Display` for user-facing output.
-
-### Error Handling
-- Top-level functions return `Result<T, Box<dyn std::error::Error>>`.
-- Use `?` for propagation when failing should stop the command.
-- For per-file processing, log with `eprintln!` and continue.
-- Avoid panics; only `unwrap` when invariants are guaranteed.
-
-### Collections and Sorting
-- Deduplicate and sort results for stable output.
-- Sort by file, line, and method.
-- Sort maps into vectors before returning or printing.
-
-## AST Parsing Conventions (SWC)
-
-- Use SWC visitor pattern (`Visit`) and call `visit_children_with`.
-- Keep AST extraction in `src/ast_parser.rs`.
-- Track local object literals to resolve identifier-based queries.
-- Treat `$`-prefixed keys as operators and drill into nested objects.
-- When query arg is an array of objects, merge extracted fields.
-
-Relevant helpers:
-- `QUERY_METHODS` lists supported MongoDB methods.
-- `get_injected_model_name` handles NestJS `@InjectModel`.
-- `resolve_collection` follows `collection()`, `useDb()`, or model naming.
-
-## File Traversal
-
-- Use `walkdir::WalkDir` with `filter_entry` to avoid large directories.
-- Ignore `node_modules`, `.git`, `dist`, `target`.
-- Only scan `.ts` and `.tsx` files.
-- Exclude test files (`*.spec.ts`, `*.test.ts`).
-
-## Testing Strategy
-
-- Unit tests in same module under `#[cfg(test)]`.
-- Use inline TypeScript snippets to test AST parsing.
-- Assert on `MongoQuery` fields: collection, method, fields, line.
-- Add tests when introducing new query methods or collection resolvers.
-
-## CLI Conventions
-
-- CLI uses `clap` with subcommands (`analyze`, `indexes`).
-- Keep output readable and stable; avoid reordering without intent.
-- For paths, prefer file name when possible.
-
-Usage:
+CLI execution examples:
 ```bash
-mongo-analyzer analyze
-mongo-analyzer --directory /path/to/project analyze
+# Analyze current directory
+cargo run -- analyze
+
+# Suggest indexes for current directory
+cargo run -- indexes
+
+# Analyze a specific project directory
+cargo run -- -d /path/to/project analyze
 ```
 
-## Output and Determinism
+## Code Style and Conventions
+### Imports
+- Group imports in this order: `std`, third-party crates, then `crate::...`.
+- Prefer explicit imports; avoid glob imports unless already established.
+- Keep imports minimal and remove unused entries.
+### Formatting
+- Follow `cargo fmt` output; do not hand-format against formatter style.
+- Keep functions focused; split when a function handles mixed concerns.
+- Prefer early returns/`let ... else` to reduce nested `if` blocks.
+- Use trailing commas in multiline literals and argument lists.
+### Naming
+- Functions/variables/modules: `snake_case`.
+- Structs/enums/traits: `PascalCase`.
+- Constants/statics: `SCREAMING_SNAKE_CASE`.
+- Choose descriptive names tied to Mongo query analysis domain.
+### Types and Modeling
+- Prefer structs/enums over loosely typed string maps where practical.
+- Preserve stable output ordering by sorting vectors deterministically.
+- Use `Vec<T>` for ordered output and document ordering assumptions.
+- Keep public types in `src/lib.rs` coherent with CLI display behavior.
+### Error Handling
+- Top-level APIs should return `Result<_, Box<dyn std::error::Error>>`.
+- Propagate failures with `?` when the operation should abort.
+- For per-file read/parse issues, log warnings (`eprintln!`) and continue.
+- Avoid panics in normal flow; avoid `unwrap` unless invariant is guaranteed.
+### Ownership and Cloning
+- Avoid unnecessary cloning in hot paths.
+- Clone AST/query data only when required for borrowing/lifetime clarity.
+- Prefer borrowing (`&str`, `&T`) over owned allocations in helper APIs.
+### Collections and Determinism
+- Avoid depending on `HashMap` iteration order in user-facing output.
+- Convert map/grouped data into vectors and sort before printing/returning.
+- Keep sort keys stable (currently file, line, method for raw query list).
+- Deduplicate where repeated AST matches can occur.
 
-- Keep ordering stable for easy diff review.
-- Prefer deterministic sorting over HashMap iteration.
-- Use clear, human-readable wording in `Display` implementations.
+## AST Parser Rules (SWC)
+- Keep AST extraction logic in `src/ast_parser.rs`.
+- Use SWC visitor pattern (`Visit`) and call `visit_children_with`.
+- Maintain `QUERY_METHODS` as the canonical supported method list.
+- Keep collection resolution logic centralized in `resolve_collection`.
+- Preserve decorator-based model mapping (`InjectModel`) behavior.
+- Continue supporting identifier-backed local object predicates.
+- For `$` operators, recurse into nested objects/arrays to find real fields.
+- For array query args (e.g., aggregation stages), merge discovered fields.
+- Skip unknown AST shapes safely instead of panicking.
+
+## File Traversal Rules
+- Traverse with `walkdir::WalkDir` + `filter_entry`.
+- Ignore heavy/unrelated directories: `node_modules`, `.git`, `dist`, `target`.
+- Only process `.ts` and `.tsx` files.
+- Exclude test files (`*.spec.ts`, `*.test.ts`) from analysis.
+- Keep traversal efficient; avoid extra filesystem passes when possible.
+
+## Testing Guidance
+- Place unit tests near implementation under `#[cfg(test)]` modules.
+- Prefer inline TypeScript snippets for parser behavior tests.
+- Assert full `MongoQuery` semantics: collection, method, fields, line, raw match.
+- Add tests for new query methods, resolver changes, and edge AST patterns.
+- Keep tests deterministic (sorted fields/order-sensitive expectations).
+
+## CLI and Output Guidelines
+- CLI is built with `clap` and exposes `analyze` and `indexes` subcommands.
+- Keep output stable and human-readable; avoid accidental reordering.
+- When printing files, prefer file names where context allows.
+- Preserve current command semantics unless change is explicitly requested.
 
 ## Performance and Safety
+- Avoid expensive rescans or repeated parsing of identical inputs.
+- Keep visitor recursion bounded and defensive.
+- Prefer linear passes and lightweight allocations in parsing hot paths.
+- Handle parse failures gracefully by returning empty module/query sets.
 
-- Avoid loading large directories; extend `IGNORED_DIRS` sparingly.
-- Reuse parsed data rather than re-walking filesystem.
-- Keep recursion in AST visitors bounded and defensive.
-- Skip unrecognized AST shapes instead of panicking.
+## Repository Rule Files (Cursor/Copilot)
+Checked locations:
+- `.cursor/rules/`
+- `.cursorrules`
+- `.github/copilot-instructions.md`
+Result: none of these files exist in this repository at time of writing.
 
-## Reference Documentation
+## Reference Docs
+See `docs/` for MongoDB syntax/domain references:
+- `docs/QUERY_SYNTAX.md`
+- `docs/AGGREGATION_SYNTAX.md`
+- `docs/CRUD.md`
+- `docs/PERFORMANCE.md`
+- `docs/GLOSSARY.md`
 
-See `docs/` directory:
-- `QUERY_SYNTAX.md`: Query operators ($eq, $gt, $in), logical operators.
-- `AGGREGATION_SYNTAX.md`: Pipeline stages, accumulators.
-- `CRUD.md`: Create, Read, Update, Delete operations.
-- `PERFORMANCE.md`: Tuning, indexes, metrics.
-- `GLOSSARY.md`: MongoDB term definitions.
-
-## Cursor / Copilot Rules
-
-No `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` found.
-
-## Agent Notes
-
-- Preserve existing logic and ordering when making changes.
-- Avoid large refactors unless requested.
-- Keep functions small and focused, especially in AST visitor.
+## Agent Working Notes
+- Preserve existing behavior and output ordering unless asked otherwise.
+- Avoid large refactors without explicit user request.
+- Keep changes targeted and easy to review.
+- If you introduce new behavior, update tests and this guide as needed.
